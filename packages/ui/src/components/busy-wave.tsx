@@ -116,6 +116,11 @@ export function BusyWave(props: {
   })
 
   createEffect(() => {
+    if (paused()) stop()
+    else start()
+  })
+
+  createEffect(() => {
     const f = frame()
     for (let i = 0; i < SEGMENTS; i++) {
       const rect = rects[i]
