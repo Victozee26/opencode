@@ -11,11 +11,11 @@ const INACTIVE_SCALE = 0.25
 const MIN_ALPHA = 0.3
 const SEGMENT_INDEXES = Array.from({ length: SEGMENTS }, (_, index) => index)
 
-export function trailScale(index: number) {
-  const t = 1 - index / (TRAIL_STEPS - 1)
-  const eased = 1 - t * t * t
-  return 1 - eased * (1 - INACTIVE_SCALE)
-}
+const SEGMENT_WIDTH = 8
+const SEGMENT_HEIGHT = 8
+const SEGMENT_GAP = 2
+const SVG_WIDTH = SEGMENTS * SEGMENT_WIDTH + (SEGMENTS - 1) * SEGMENT_GAP
+const SVG_HEIGHT = SEGMENT_HEIGHT
 
 export function segmentState(frame: number, char: number) {
   const forwardFrames = SEGMENTS
@@ -60,9 +60,7 @@ export function segmentState(frame: number, char: number) {
         ? distance
         : -1
 
-  if (index >= 0 && index < TRAIL_STEPS) {
-    return { alpha: TRAIL_ALPHAS[index], scaleY: trailScale(index) }
-  }
+  if (index >= 0 && index < TRAIL_STEPS) return { alpha: TRAIL_ALPHAS[index], active: true, scaleY: 1 }
 
   let fadeFactor = 1
   if (isHolding && holdTotal > 0) {
@@ -72,7 +70,12 @@ export function segmentState(frame: number, char: number) {
     const progress = Math.min(movementProgress / Math.max(1, movementTotal - 1), 1)
     fadeFactor = MIN_ALPHA + progress * (1 - MIN_ALPHA)
   }
-  return { alpha: INACTIVE_ALPHA * fadeFactor, scaleY: INACTIVE_SCALE * fadeFactor }
+  return { alpha: INACTIVE_ALPHA * fadeFactor, active: false, scaleY: INACTIVE_SCALE * fadeFactor }
+}
+
+function colorAtAlpha(color: string | undefined, alpha: number) {
+  const c = color ? color : "var(--text-weak)"
+  return `color-mix(in srgb, ${c} ${alpha * 100}%, transparent)`
 }
 
 export function BusyWave(props: {
@@ -82,51 +85,69 @@ export function BusyWave(props: {
   style?: JSX.CSSProperties
 }) {
   const [frame, setFrame] = createSignal(0)
-  const segments: HTMLSpanElement[] = []
+  const rects: SVGRectElement[] = []
 
-  const motionMedia = window.matchMedia("(prefers-reduced-motion: reduce)")
-  const [paused, setPaused] = createSignal(motionMedia.matches)
+  const motionMedia = typeof window !== "undefined"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : undefined
+  const [paused, setPaused] = createSignal(motionMedia?.matches ?? false)
   const onMotionChange = (event: MediaQueryListEvent) => setPaused(event.matches)
-  motionMedia.addEventListener("change", onMotionChange)
+  motionMedia?.addEventListener("change", onMotionChange)
 
-  let rafID: number | undefined
-  let last = 0
-  const tick = (now: number) => {
-    rafID = requestAnimationFrame(tick)
-    if (paused()) return
-    if (now - last < FRAME_MS) return
-    last = now - ((now - last) % FRAME_MS)
-    setFrame((current) => (current + 1) % TOTAL_FRAMES)
+  let timer: ReturnType<typeof setInterval> | undefined
+  const start = () => {
+    if (timer !== undefined || paused()) return
+    timer = setInterval(() => setFrame((current) => (current + 1) % TOTAL_FRAMES), FRAME_MS)
   }
-  rafID = requestAnimationFrame(tick)
+  const stop = () => {
+    if (timer === undefined) return
+    clearInterval(timer)
+    timer = undefined
+  }
 
   onCleanup(() => {
-    if (rafID !== undefined) cancelAnimationFrame(rafID)
-    motionMedia.removeEventListener("change", onMotionChange)
+    stop()
+    motionMedia?.removeEventListener("change", onMotionChange)
+  })
+
+  createEffect(() => {
+    if (paused()) { stop(); return }
+    start()
   })
 
   createEffect(() => {
     const f = frame()
     for (let i = 0; i < SEGMENTS; i++) {
-      const el = segments[i]
-      if (!el) continue
+      const rect = rects[i]
+      if (!rect) continue
       const state = segmentState(f, i)
-      el.style.opacity = String(state.alpha)
-      el.style.transform = `scaleY(${state.scaleY})`
+      const height = SEGMENT_HEIGHT * state.scaleY
+      rect.setAttribute("y", String((SEGMENT_HEIGHT - height) / 2))
+      rect.setAttribute("height", String(height))
+      rect.setAttribute("fill", colorAtAlpha(props.color, state.alpha))
     }
   })
 
   return (
-    <div
+    <svg
       data-component="busy-wave"
       class={props.class}
-      style={{ "--busy-wave-color": props.color, ...props.style }}
+      style={props.style}
+      viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
+      width={SVG_WIDTH}
+      height={SVG_HEIGHT}
       role="status"
+      aria-busy="true"
       aria-label={props.label}
     >
       {SEGMENT_INDEXES.map((char) => (
-        <span data-slot="busy-wave-segment" ref={(el) => { segments[char] = el }} />
+        <rect
+          data-slot="busy-wave-segment"
+          x={char * (SEGMENT_WIDTH + SEGMENT_GAP)}
+          width={SEGMENT_WIDTH}
+          ref={(el) => { rects[char] = el }}
+        />
       ))}
-    </div>
+    </svg>
   )
 }

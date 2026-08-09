@@ -1,11 +1,10 @@
-// @ts-nocheck
-import * as mod from "./busy-wave"
+import { BusyWave } from "./busy-wave"
 import { create } from "../storybook/scaffold"
 
 const docs = `### Overview
-Busy indicator ported from the TUI: eight segments sweeping in a bidirectional wave with a gradient alpha trail and easeOutCubic vertical scaling.
+TUI-accurate busy indicator: 8 SVG rectangles sweeping bidirectionally with an alpha trail via CSS color-mix().
 
-Use while a session is working, in place of a static loading label(Thinking ).
+Use while a session is working.
 
 ### API
 - Optional: \`color\` (any CSS color, default \`var(--text-weak)\`), \`label\` (aria-label), \`class\`, \`style\`.
@@ -15,22 +14,18 @@ Use while a session is working, in place of a static loading label(Thinking ).
 - Animation pauses under \`prefers-reduced-motion\`.
 
 ### Behavior
-- 54-frame bidirectional cycle at 40ms per frame (25fps): 8 forward, 9-frame hold, 7 backward, 30-frame hold.
-- Segments render as fixed spans; opacity and \`scaleY\` are patched imperatively each frame.
+- 54-frame bidirectional cycle at 40ms per frame: 8 forward, 9-frame hold, 7 backward, 30-frame hold.
+- 6-step exponential alpha trail, inactive segments shrink vertically with a fade factor.
 
 ### Accessibility
-- \`role="status"\` with the \`label\` as \`aria-label\`.
-
-### Theming/tokens
-- Uses \`data-component="busy-wave"\` and the \`--busy-wave-color\` custom property.
-
+- \`role="status"\` with \`aria-busy="true"\` and \`aria-label\`.
 `
 
 const defaults = {
   label: "Thinking",
 } as const
 
-const story = create({ title: "UI/BusyWave", mod, args: defaults })
+const story = create({ title: "UI/BusyWave", mod: { BusyWave }, args: defaults })
 
 export default {
   title: "UI/BusyWave",

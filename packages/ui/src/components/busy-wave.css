@@ -1,16 +1,5 @@
 [data-component="busy-wave"] {
-  --busy-wave-color: var(--text-weak);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 12px;
-  flex-shrink: 0;
-}
-
-[data-slot="busy-wave-segment"] {
-  background-color: var(--busy-wave-color);
-  border-radius: 2px;
-  width: 4px;
-  height: 100%;
+  display: inline-block;
+  vertical-align: middle;
   flex-shrink: 0;
 }
