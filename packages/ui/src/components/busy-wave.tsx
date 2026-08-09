@@ -61,7 +61,8 @@ export function segmentState(frame: number, char: number) {
         : -1
 
   if (index >= 0 && index < TRAIL_STEPS) {
-    return { alpha: TRAIL_ALPHAS[index], scaleY: trailScale(index) }
+    const brightness = index === 1 ? 1.15 : 1
+    return { alpha: TRAIL_ALPHAS[index], scaleY: trailScale(index), brightness }
   }
 
   let fadeFactor = 1
@@ -72,7 +73,7 @@ export function segmentState(frame: number, char: number) {
     const progress = Math.min(movementProgress / Math.max(1, movementTotal - 1), 1)
     fadeFactor = MIN_ALPHA + progress * (1 - MIN_ALPHA)
   }
-  return { alpha: INACTIVE_ALPHA * fadeFactor, scaleY: INACTIVE_SCALE * fadeFactor }
+  return { alpha: INACTIVE_ALPHA * fadeFactor, scaleY: INACTIVE_SCALE * fadeFactor, brightness: 1 }
 }
 
 export function BusyWave(props: {
@@ -89,20 +90,25 @@ export function BusyWave(props: {
   const onMotionChange = (event: MediaQueryListEvent) => setPaused(event.matches)
   motionMedia.addEventListener("change", onMotionChange)
 
-  let rafID: number | undefined
-  let last = 0
-  const tick = (now: number) => {
-    rafID = requestAnimationFrame(tick)
-    if (paused()) return
-    if (now - last < FRAME_MS) return
-    last = now - ((now - last) % FRAME_MS)
-    setFrame((current) => (current + 1) % TOTAL_FRAMES)
+  let timer: ReturnType<typeof setInterval> | undefined
+  const start = () => {
+    if (timer !== undefined || paused()) return
+    timer = setInterval(() => setFrame((current) => (current + 1) % TOTAL_FRAMES), FRAME_MS)
   }
-  rafID = requestAnimationFrame(tick)
+  const stop = () => {
+    if (timer === undefined) return
+    clearInterval(timer)
+    timer = undefined
+  }
 
   onCleanup(() => {
-    if (rafID !== undefined) cancelAnimationFrame(rafID)
+    stop()
     motionMedia.removeEventListener("change", onMotionChange)
+  })
+
+  createEffect(() => {
+    if (paused()) stop()
+    else start()
   })
 
   createEffect(() => {
@@ -113,6 +119,7 @@ export function BusyWave(props: {
       const state = segmentState(f, i)
       el.style.opacity = String(state.alpha)
       el.style.transform = `scaleY(${state.scaleY})`
+      el.style.filter = state.brightness !== 1 ? `brightness(${state.brightness})` : ""
     }
   })
 
@@ -122,6 +129,7 @@ export function BusyWave(props: {
       class={props.class}
       style={{ "--busy-wave-color": props.color, ...props.style }}
       role="status"
+      aria-busy="true"
       aria-label={props.label}
     >
       {SEGMENT_INDEXES.map((char) => (
