@@ -9,6 +9,8 @@ import type {
 } from "@opencode-ai/plugin/tui/context"
 import { Config } from "./config"
 import { Schema } from "effect"
+import { existsSync } from "node:fs"
+import { spawn } from "node:child_process"
 import stripAnsi from "strip-ansi"
 import * as TuiAudio from "./audio"
 import {
@@ -44,6 +46,29 @@ const BUILTIN_SOUNDS: Record<AttentionSoundName, string> = {
   subagent_done: subagentDoneSoundPath,
 }
 
+const TERMUX_DATA_PATH = "/data/data/com.termux"
+const TERMUX_BIN_PATH = "/data/data/com.termux/files/usr/bin/termux-notification"
+
+function defaultIsTermuxAvailable() {
+  try {
+    return existsSync(TERMUX_DATA_PATH)
+  } catch {
+    return false
+  }
+}
+
+function defaultNotifyTermux(title: string, message: string) {
+  try {
+    const bin = existsSync(TERMUX_BIN_PATH) ? TERMUX_BIN_PATH : "termux-notification"
+    const child = spawn(bin, ["--title", title, "--content", message], { stdio: "ignore" })
+    child.on("error", () => {})
+    child.unref?.()
+    return true
+  } catch {
+    return false
+  }
+}
+
 function skipped(reason: AttentionNotifySkipReason): AttentionNotifyResult {
   return {
     ok: false,
@@ -75,7 +100,7 @@ function soundVolume(input: AttentionNotifyOptions, config: Pick<Config.Resolved
   return clampVolume(input.sound.volume ?? config.attention.volume)
 }
 
-function focusSkip(when: AttentionWhen, focus: FocusState) {
+function focusSkip(when: AttentionWhen, focus: FocusState): AttentionNotifySkipReason | undefined {
   if (when === "always") return
   if (focus === "unknown") return "focus_unknown"
   if (when === "blurred" && focus === "focused") return "focused"
@@ -86,6 +111,10 @@ export function createTuiAttention(input: {
   renderer: AttentionRenderer
   config: Pick<Config.Resolved, "attention">
   audio?: Pick<typeof TuiAudio, "loadSoundFile" | "play">
+  termux?: {
+    isAvailable?: () => boolean
+    notify?: (title: string, message: string) => boolean
+  }
 }): AttentionHost {
   let focus: FocusState = "unknown"
   let disposed = false
@@ -125,6 +154,27 @@ export function createTuiAttention(input: {
     }
   }
 
+  let termuxAvailableCache: boolean | undefined
+
+  function isTermuxAvailable() {
+    if (input.termux?.isAvailable) return input.termux.isAvailable()
+    if (termuxAvailableCache !== undefined) return termuxAvailableCache
+    const available = defaultIsTermuxAvailable()
+    termuxAvailableCache = available
+    return available
+  }
+
+  function notifyTermux(title: string, message: string) {
+    if (input.termux?.notify) {
+      try {
+        return input.termux.notify(title, message)
+      } catch {
+        return false
+      }
+    }
+    return defaultNotifyTermux(title, message)
+  }
+
   return {
     async notify(request) {
       try {
@@ -135,16 +185,24 @@ export function createTuiAttention(input: {
         if (!message) return skipped("empty_message")
 
         const requestedNotification = typeof request.notification === "object" ? request.notification : undefined
-        const notificationSkip = focusSkip(requestedNotification?.when ?? "blurred", focus)
+        const baseSkip = focusSkip(requestedNotification?.when ?? "blurred", focus)
+        // Termux lacks OSC focus events; treat focus_unknown as blurred when Termux is available
+        const termuxAvailable = isTermuxAvailable()
+        const notificationSkip = baseSkip === "focus_unknown" && termuxAvailable ? undefined : baseSkip
         const notificationRequested = input.config.attention.notifications && request.notification !== false
         const shouldNotify = notificationRequested && !notificationSkip
+        const title = normalizeText(request.title, DEFAULT_TITLE, TITLE_LIMIT)
         const notification = shouldNotify
           ? (() => {
+              if (termuxAvailable) {
+                try {
+                  if (notifyTermux(title, message)) return true
+                } catch (error) {
+                  console.debug("failed to trigger termux notification", { error })
+                }
+              }
               try {
-                return input.renderer.triggerNotification(
-                  message,
-                  normalizeText(request.title, DEFAULT_TITLE, TITLE_LIMIT),
-                )
+                return input.renderer.triggerNotification(message, title)
               } catch (error) {
                 console.debug("failed to trigger attention notification", { error })
                 return false
